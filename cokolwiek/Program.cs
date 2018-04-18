@@ -64,6 +64,15 @@ namespace cokolwiek
             FileStream deserFS = new FileStream("tekst.txt", FileMode.Open);
             var deser = form.Deserialize(deserFS);
             var deserContext = ((ShopContextWrapper)deser).GetContext();
+            var client = deserContext.Invoices.First().Client;
+            foreach (var cl in deserContext.Clients)
+            {
+                if(client == cl)
+                {
+                    cl.FirstName = "fafafaf";
+                    Console.WriteLine("Szach mat!!!");
+                }
+            }
         }
         public class Produktieren
         {

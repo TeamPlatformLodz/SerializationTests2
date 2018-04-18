@@ -99,6 +99,7 @@ namespace cokolwiek
             var name = pieces[1].Split(col_elemt_del_sec_end, StringSplitOptions.None);
             return name[0];
         }
+
         public static bool CheckIsRefId(string[] classMetadata)
         {
             bool isFound = false;
@@ -124,6 +125,21 @@ namespace cokolwiek
             else if (line.Contains("System.Collections.Generic.Dictionary"))
                 return true;
             else if (line.Contains("System.String[]"))
+                return true;
+            else
+                return false;
+        }
+
+        public static bool CheckForClassEnding(string line)
+        {
+            if (line.Trim() == ")")
+                return true;
+            else
+                return false;
+        }
+        public static bool CheckForCollectionEnding(string line)
+        {
+            if (line.Trim() == ">")
                 return true;
             else
                 return false;

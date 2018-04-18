@@ -12,6 +12,10 @@ using System.Linq;
 using System.Collections.ObjectModel;
 using Shop;
 
+using static cokolwiek.RH;
+using static cokolwiek.TypeHandler;
+using static cokolwiek.GenericCollectionCreator;
+
 namespace cokolwiek
 {
     class CustomFormatter : IFormatter
@@ -25,20 +29,22 @@ namespace cokolwiek
 
         public CustomFormatter()
         {
-            context = new StreamingContext(StreamingContextStates.All);
             idGenerator = new ObjectIDGenerator();
         }
+
+        #region deserialize
 
         public object Deserialize(System.IO.Stream serializationStream)
         {
             using (StreamReader sr = new StreamReader(serializationStream))
             {
-                Dictionary<object, List<ClassLoadInfo>> objectsInfo = new Dictionary<object, List<ClassLoadInfo>>();
+                // stores information to what objects given object has references
+                Dictionary<object, List<ClassLoadInfo>> objectReferences = new Dictionary<object, List<ClassLoadInfo>>();
                 Dictionary<string, object> objectDictionary = new Dictionary<string, object>();
-                Stack<object> objectLoadOrder = new Stack<object>();
+                Stack<object> orderStack = new Stack<object>();
                 Dictionary<string, List<object>> placeholderLists = new Dictionary<string, List<object>>();
                 Dictionary<object, string> placeholderRealTypes = new Dictionary<object, string>();
-                Dictionary<object, string[]> placeholderElementTypes = new Dictionary<object, string[]>();
+                Dictionary<object, string> placeholderElementTypes = new Dictionary<object, string>();
 
                 Metadata meta;
                 string line = ""; 
@@ -46,211 +52,231 @@ namespace cokolwiek
                 #region read lines
                 while (line != null)
                 {
-                    meta = RH.ReadMetadata(line);
+                    meta = ReadMetadata(line);
                     if (meta.Type != "")
                     {
                         if(meta.Id != "") //is reference type
                         {
                             if(meta.IsRefId)
                             {
-                                //register in previous object properties
-                                var propertyForNewObjectInfo = new ClassLoadInfo()
-                                {
-                                    Id = meta.Id,
-                                    Name = meta.Name,
-                                };
-                                var topObject = objectLoadOrder.Peek();
-                                if (topObject is IList)
-                                {
-                                    var list = topObject as IList;
-                                    list.Add(propertyForNewObjectInfo);
-                                }
-                                else
-                                {
-                                    objectsInfo[topObject].Add(propertyForNewObjectInfo);
-                                }
-                                objectLoadOrder.Push(new object());
+                                RegisterRefIdObject(orderStack, objectReferences, meta);                                            
                             }
                             else // not a refID, so construct new object
                             {
-                                if(objectLoadOrder.Count == 0) //no objects yet
+                                if(orderStack.Count == 0) //object is a top object
                                 {
-                                    //Instantiate new, root class
-                                    object newObject = GetInstance(meta.Type);
-                                    objectDictionary.Add(meta.Id, newObject);
-                                    objectsInfo.Add(newObject, new List<ClassLoadInfo>());
-                                    objectLoadOrder.Push(newObject);
+                                    RegisterTopLevelObject(objectDictionary,objectReferences, orderStack, meta);
                                 }
-                                else    //not a top object
+                                else    //object is other object property
                                 {
-                                    object newObject = "BadValue"; //dummy value                     
-                                    if (RH.ContainsCollection(line))  //is collection ?
-                                    {
-                                        newObject = new List<object>();
-                                        placeholderLists.Add(meta.Id, (List<object>)newObject); //register new placeholder
-                                        placeholderRealTypes.Add(newObject, meta.Type);
-                                        string firstTypeName = RH.LookForListElementType(line);
-                                        string secondTypeName = RH.LookForSecondElementType(line);
-                                        placeholderElementTypes.Add(newObject, new string[] { firstTypeName, secondTypeName });
-                                    }
-                                    else
-                                    {
-                                        newObject = GetInstance(meta.Type);
-                                    }
-
-                                    objectDictionary.Add(meta.Id, newObject); //register object
-                                    objectsInfo.Add(newObject, new List<ClassLoadInfo>());//register missing property
-
-                                    //register in previous object properties
-                                    var propertyForNewObjectInfo = new ClassLoadInfo()
-                                    {
-                                        Id = meta.Id,
-                                        Name = meta.Name,
-                                    };
-                                    objectsInfo[objectLoadOrder.Peek()].Add(propertyForNewObjectInfo);
-                                    //
-                                    objectLoadOrder.Push(newObject);
+                                    RegisterSubObject(line, objectDictionary, objectReferences, orderStack, meta, placeholderLists, placeholderRealTypes, placeholderElementTypes);
                                 }
                             }
                         }
                         else //is value type
                         {
-                            var valueToSet = GetValueToSet(line, meta.Type);
-                            var objectToSet = objectLoadOrder.Peek();
-                            if(objectToSet is IList) //add to collection
-                            {
-                                var placeList =  objectToSet as IList;
-                                placeList.Add(valueToSet);
-                            }
-                            else //set property
-                            {
-                                var property = objectToSet.GetType().GetProperty(meta.Name);
-                                property.SetValue(objectToSet, valueToSet, null);
-                            }
+                            RegisterValueObject(orderStack, line, meta);
                         }
                     }
-                    if (CheckForClassEnding(line)) // top object is finished
+                    if (CheckForClassEnding(line) || CheckForCollectionEnding(line)) //move up one element
                     {
-                        if (objectLoadOrder.Count != 0)
-                            objectLoadOrder.Pop();
-                    }
-                    if (CheckForCollectionEnding(line) && objectLoadOrder.Peek() is IList)
-                    {
-                        if (objectLoadOrder.Count != 0)
-                            objectLoadOrder.Pop();
+                        if (orderStack.Count != 0)
+                            orderStack.Pop();
                     }
                     line = sr.ReadLine();
                 }
-#endregion
+                #endregion
 
-                foreach (var key in placeholderLists.Keys)
-                {
-                    var list = placeholderLists[key];
-                    var typeName = placeholderRealTypes[list];
-                    string[] typeNames = placeholderElementTypes[list];
-                    var collection = CreateProperCollection(typeName, typeNames);
-                    if (collection is List<Client>)
-                    {
-                        var listCollection = collection as List<Client>;
-                        var clients = objectsInfo[list];
-                        foreach (var client in clients)
-                        {
-                            var itemToLoad = objectDictionary[client.Id];
-                            listCollection.Add((Client)itemToLoad);
-                        }
-                        objectDictionary[key] = listCollection; //swap proper list with placeholder
-                        var tempInfo = objectsInfo[list];
-                        objectsInfo.Remove(list);
-                        objectsInfo.Add(listCollection, tempInfo);
-                    }
-                    if (collection is List<String>)
-                    {
-                        var listCollection = collection as List<String>;
-                        var keys = objectsInfo[list];
-                        foreach (var productKey in keys)
-                        {
-                            var itemToLoad = objectDictionary[productKey.Id];
-                            listCollection.Add((String)itemToLoad);
-                        }
-                        objectDictionary[key] = listCollection; //swap proper list with placeholder
-                        var tempInfo = objectsInfo[list];
-                        objectsInfo.Remove(list);
-                        objectsInfo.Add(listCollection, tempInfo);
-                    }
-                    if (collection is List<Product>)
-                    {
-                        var listCollection = collection as List<Product>;
-                        var prodcucts = objectsInfo[list];
-                        foreach (var product in prodcucts)
-                        {
-                            var itemToLoad = objectDictionary[product.Id];
-                            listCollection.Add((Product)itemToLoad);
-                        }
-                        objectDictionary[key] = listCollection; //swap proper list with placeholder
-                        var tempInfo = objectsInfo[list];
-                        objectsInfo.Remove(list);
-                        objectsInfo.Add(listCollection, tempInfo);
-                    }
-                    if (collection is List<Invoice>)
-                    {
-                        var listCollection = collection as List<Invoice>;
-                        var invoices = objectsInfo[list];
-                        foreach (var invoice in invoices)
-                        {
-                            var itemToLoad = objectDictionary[invoice.Id];
-                            listCollection.Add((Invoice)itemToLoad);
-                        }
-                        objectDictionary[key] = listCollection;
-                        var tempInfo = objectsInfo[list];
-                        objectsInfo.Remove(list);
-                        objectsInfo.Add(listCollection, tempInfo);
-                    }
-                    if (collection is List<ProductState>)
-                    {
-                        var listCollection = collection as List<ProductState>;
-                        var pStates = objectsInfo[list];
-                        foreach (var state in pStates)
-                        {
-                            var itemToLoad = objectDictionary[state.Id];
-                            listCollection.Add((ProductState)itemToLoad);
-                        }
-                        objectDictionary[key] = listCollection;
-                        var tempInfo = objectsInfo[list];
-                        objectsInfo.Remove(list);
-                        objectsInfo.Add(listCollection, tempInfo);
-                    }
-  
-                }
+                ReplacePlaceHolderLists();
 
-                foreach (var item in objectDictionary.Values) // assign created objects referenced by REF_ID
+                SetReferences(objectDictionary, objectReferences);
+
+                return objectDictionary.Values.First(); // return first found object
+
+                #region local methods
+                void ReplacePlaceHolderLists()
                 {
-                    if (! (item is Percentage))
+                    foreach (var key in placeholderLists.Keys)
                     {
-                        var propertiesList = objectsInfo[item];
-                        if (item is ICollection)
+                        var list = placeholderLists[key];
+                        var typeName = placeholderRealTypes[list];
+                        string elementType = placeholderElementTypes[list];
+                        var collection = CreateProperCollection(typeName, elementType);
+                        if (collection is IList)
                         {
-                            //var list = item as IList;
-                            //foreach (var propertyInfo in propertiesList) //find object with that ID
-                            //{
-                            //    list.Add(objectDictionary[propertyInfo.Id]);  //add element
-                            //}
-                        }
-                        else
-                        {
-                            foreach (var propertyInfo in propertiesList) //find object with that ID
+                            var listCollection = collection as IList;
+                            var items = objectReferences[list];
+                            foreach (var item in items)
                             {
-                                var property = item.GetType().GetProperty(propertyInfo.Name);
-                                var valueToSet = objectDictionary[propertyInfo.Id];
-                                property.SetValue(item, valueToSet);  //set property
+                                var itemToLoad = objectDictionary[item.Id];
+                                listCollection.Add(itemToLoad);
                             }
+                            objectDictionary[key] = listCollection; //swap proper list with placeholder
+                            var tempInfo = objectReferences[list];
+                            objectReferences.Remove(list);
+                            objectReferences.Add(listCollection, tempInfo);
                         }
+                        #region
+                        //if (collection is List<String>)
+                        //{
+                        //    var listCollection = collection as List<String>;
+                        //    var keys = objectReferences[list];
+                        //    foreach (var productKey in keys)
+                        //    {
+                        //        var itemToLoad = objectDictionary[productKey.Id];
+                        //        listCollection.Add((String)itemToLoad);
+                        //    }
+                        //    objectDictionary[key] = listCollection; //swap proper list with placeholder
+                        //    var tempInfo = objectReferences[list];
+                        //    objectReferences.Remove(list);
+                        //    objectReferences.Add(listCollection, tempInfo);
+                        //}
+                        //if (collection is List<Product>)
+                        //{
+                        //    var listCollection = collection as List<Product>;
+                        //    var prodcucts = objectReferences[list];
+                        //    foreach (var product in prodcucts)
+                        //    {
+                        //        var itemToLoad = objectDictionary[product.Id];
+                        //        listCollection.Add((Product)itemToLoad);
+                        //    }
+                        //    objectDictionary[key] = listCollection; //swap proper list with placeholder
+                        //    var tempInfo = objectReferences[list];
+                        //    objectReferences.Remove(list);
+                        //    objectReferences.Add(listCollection, tempInfo);
+                        //}
+                        //if (collection is List<Invoice>)
+                        //{
+                        //    var listCollection = collection as List<Invoice>;
+                        //    var invoices = objectReferences[list];
+                        //    foreach (var invoice in invoices)
+                        //    {
+                        //        var itemToLoad = objectDictionary[invoice.Id];
+                        //        listCollection.Add((Invoice)itemToLoad);
+                        //    }
+                        //    objectDictionary[key] = listCollection;
+                        //    var tempInfo = objectReferences[list];
+                        //    objectReferences.Remove(list);
+                        //    objectReferences.Add(listCollection, tempInfo);
+                        //}
+                        //if (collection is List<ProductState>)
+                        //{
+                        //    var listCollection = collection as List<ProductState>;
+                        //    var pStates = objectReferences[list];
+                        //    foreach (var state in pStates)
+                        //    {
+                        //        var itemToLoad = objectDictionary[state.Id];
+                        //        listCollection.Add((ProductState)itemToLoad);
+                        //    }
+                        //    objectDictionary[key] = listCollection;
+                        //    var tempInfo = objectReferences[list];
+                        //    objectReferences.Remove(list);
+                        //    objectReferences.Add(listCollection, tempInfo);
+                        //}
+                        #endregion
                     }
                 }
-                return objectDictionary.Values.First();
+                #endregion
             }  
         }
+        private void RegisterTopLevelObject(Dictionary<string, object> objectDictionary, Dictionary<object, List<ClassLoadInfo>> objectReferences, Stack<object> order, Metadata metadata)
+        {
+            //Instantiate new, root class
+            object newObject = GetInstance(metadata.Type);
+            objectDictionary.Add(metadata.Id, newObject);
+            objectReferences.Add(newObject, new List<ClassLoadInfo>());
+            order.Push(newObject);
+        }
 
-        private object GetValueToSet(string line, string type)
+        private void RegisterSubObject(string line, Dictionary<string, object> objectDictionary, Dictionary<object, List<ClassLoadInfo>> objectReferences, Stack<object> order, Metadata metadata,
+            Dictionary<string, List<object>> placeholderLists, Dictionary<object, string> placeholderRealTypes, Dictionary<object, string> placeholderElementTypes)
+        {
+            object newObject = "BadValue"; //dummy value                     
+            if (RH.ContainsCollection(line))  //is collection ?
+            {
+                newObject = new List<object>();
+                placeholderLists.Add(metadata.Id, (List<object>)newObject); //register new placeholder
+                placeholderRealTypes.Add(newObject, metadata.Type);
+                string firstTypeName = RH.LookForListElementType(line);
+                placeholderElementTypes.Add(newObject, firstTypeName);
+            }
+            else
+            {
+                newObject = GetInstance(metadata.Type);
+            }
+
+            objectDictionary.Add(metadata.Id, newObject); //register object
+            objectReferences.Add(newObject, new List<ClassLoadInfo>());//register missing property
+
+            //register in previous object properties
+            var propertyForNewObjectInfo = new ClassLoadInfo()
+            {
+                Id = metadata.Id,
+                Name = metadata.Name,
+            };
+            objectReferences[order.Peek()].Add(propertyForNewObjectInfo);
+            //
+            order.Push(newObject);
+        }
+
+        private void RegisterRefIdObject(Stack<object> order, Dictionary<object, List<ClassLoadInfo>> objectReferences, Metadata metadata)
+        {
+            //register in previous object properties
+            var propertyForNewObjectInfo = new ClassLoadInfo()
+            {
+                Id = metadata.Id,
+                Name = metadata.Name,
+            };
+            var topObject = order.Peek();
+            if (topObject is IList)
+            {
+                var list = topObject as IList;
+                list.Add(propertyForNewObjectInfo);
+            }
+            else
+            {
+                objectReferences[topObject].Add(propertyForNewObjectInfo);
+            }
+            order.Push(new object());
+        }
+
+        private void RegisterValueObject(Stack<object> order, string line, Metadata metadata)
+        {
+            var valueToSet = GetPrimitiveValueToSet(line, metadata.Type);
+            var objectToSet = order.Peek();
+            if (objectToSet is IList) //add to collection
+            {
+                var placeList = objectToSet as IList;
+                placeList.Add(valueToSet);
+            }
+            else //set property
+            {
+                var property = objectToSet.GetType().GetProperty(metadata.Name);
+                property.SetValue(objectToSet, valueToSet, null);
+            }
+        }
+
+        private void SetReferences(Dictionary<string, object> objectDictionary, Dictionary<object, List<ClassLoadInfo>> objectReferences)
+        {
+            foreach (var item in objectDictionary.Values) // assign created objects referenced by REF_ID
+            {
+                if (!IsPrimitive(item.GetType().ToString())) // for reference types assign their reference fields
+                {
+                    if (!(item is ICollection)) // list has elements already added
+                    {
+                        var propertiesList = objectReferences[item];
+                        foreach (var propertyInfo in propertiesList) //find object with that ID
+                        {
+                            var property = item.GetType().GetProperty(propertyInfo.Name); 
+                            var valueToSet = objectDictionary[propertyInfo.Id];
+                            property.SetValue(item, valueToSet);  //set property
+                        }
+                    }
+                }
+            }
+        }
+
+        private object GetPrimitiveValueToSet(string line, string type)
         {
             object valueToSet = RH.LookForValue(line);
             if (type == "System.Int32")
@@ -266,30 +292,20 @@ namespace cokolwiek
             return valueToSet;
         }
 
-        object CreateProperCollection(string typeName, string[] elementTypeName)
+        object CreateProperCollection(string typeName, string elementTypeName)
         {
-            var firstTypeName = elementTypeName[0];
+            var firstTypeName = elementTypeName;
             Type typeOfFirstElement;
             if (IsPrimitive(firstTypeName))
             {
-                typeOfFirstElement = Type.GetType(elementTypeName[0]);
+                typeOfFirstElement = Type.GetType(firstTypeName);
             }
             else
             {
-                typeOfFirstElement = GetInstance(elementTypeName[0]).GetType();
+                typeOfFirstElement = GetInstance(firstTypeName).GetType();
             }
             var result = TryGetList();
             if(result != null)
-            {
-                return result;
-            }
-            result = TryGetObservableCollection();
-            if (result != null)
-            {
-                return result;
-            }
-            result = TryGetDictionary();
-            if (result != null)
             {
                 return result;
             }
@@ -303,99 +319,6 @@ namespace cokolwiek
                 }
                 return null;
             }
-            object TryGetObservableCollection( )
-            {
-                if (typeName.Contains("System.Collections.Generic.ObservableCollection"))
-                {
-                    return CreateGenericObservableCollection(typeOfFirstElement);
-                }
-                return null;
-            }
-            object TryGetDictionary()
-            {
-                if (typeName.Contains("System.Collections.Generic.Dictionary"))
-                {
-                    Type typeOfSecondElement;
-                    if (IsPrimitive(elementTypeName[1]))
-                    {
-                        typeOfSecondElement = Type.GetType(elementTypeName[1]);
-                    }
-                    else
-                    {
-                        typeOfSecondElement = GetInstance(elementTypeName[1]).GetType();
-                    }
-                    return CreateGenericDictionary(typeOfFirstElement, typeOfSecondElement); //two type params
-                }
-                return null;
-            }
-        }
-
-        object GetPrimitiveInstance(string typeName)
-        {
-            if (typeName == "System.Int32")
-            {
-                int res = 0;
-                return res;
-            }
-            if (typeName == "System.Double")
-
-            {
-                double res = 0;
-                return res;
-            }
-            if (typeName == "System.Single")
-            {
-                float res = 0;
-                return res;
-            }
-            if (typeName == "System.Decimal")
-            {
-                decimal res = 0;
-                return res;
-            }
-            if (typeName == "System.DateTime")
-            {
-                DateTime res = DateTime.MinValue;
-                return res;
-            }
-            return null;
-        }
-
-        bool IsPrimitive(string typeName)
-        {
-            if (typeName == "System.String")
-            {
-                return true;
-            }
-            if (typeName == "System.String[]")
-            {
-                return true;
-            }
-            if (typeName == "System.Int32")
-            {
-                return true;
-            }
-            if (typeName == "System.Int16")
-            {
-                return true;
-            }
-            if (typeName == "System.Double")
-            {
-                return true;
-            }
-            if (typeName == "System.Single")
-            {
-                return true;
-            }
-            if (typeName == "System.Decimal")
-            {
-                return true;
-            }
-            if (typeName == "System.DateTime")
-            {
-                return true;
-            }
-            return false;
         }
 
         object CheckForCollectionType(string line, Metadata metadata)
@@ -448,57 +371,7 @@ namespace cokolwiek
             
         }
 
-        object CreateGenericList(Type typeOfElement)
-        {
-            Type[] typeArgs = new Type[] { typeOfElement };
-            var makeme = typeof(List<>).MakeGenericType(typeArgs);
-            object o = Activator.CreateInstance(makeme);
-            return o;
-        }
-        object CreateGenericObservableCollection(Type typeOfElement)
-        {
-            Type[] typeArgs = new Type[] { typeOfElement };
-            var makeme = typeof(ObservableCollection<>).MakeGenericType(typeArgs);
-            object o = Activator.CreateInstance(makeme);
-            return o;
-        }
-        object CreateGenericDictionary(Type firstElementType, Type secondElementType)
-        {
-            Type[] typeArgs = new Type[] { firstElementType, secondElementType };
-            var makeme = typeof(Dictionary<,>).MakeGenericType(typeArgs);
-            object o = Activator.CreateInstance(makeme);
-            return o;
-        }
-
-        object GetInstance(string strFullyQualifiedName)
-        {
-            Type type = Type.GetType(strFullyQualifiedName);
-            if (type != null)
-                return Activator.CreateInstance(type);
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                type = asm.GetType(strFullyQualifiedName);
-                type = asm.GetType(strFullyQualifiedName);
-                if (type != null)
-                    return Activator.CreateInstance(type);
-            }
-            return null;
-        }
-
-        bool CheckForClassEnding(string line)
-        {
-            if (line.Trim() == ")")
-                return true;
-            else
-                return false;
-        }
-        bool CheckForCollectionEnding(string line)
-        {
-            if (line.Trim() == ">")
-                return true;
-            else
-                return false;
-        }
+        #endregion
 
         #region serialization
         /// <summary>
@@ -580,21 +453,10 @@ namespace cokolwiek
             }
         }
 
-        bool IsReferenceType(Type type)
-        {
-            return (!type.IsPrimitive && !type.IsValueType && !(type == typeof(string)));
-        }
-
-        string Indent(int recurenceLvl)
-        {
-            return String.Concat(Enumerable.Repeat(indenter, recurenceLvl));
-        }
-
         void WritePrimitiveHeader(StreamWriter serializationWriter, object graph, PropertyInfo member, int recurenceLvl)
         {
             serializationWriter.WriteLine("{3}{{Type={0} Name={1}}}={2}", member.GetValue(graph)?.GetType().FullName, member?.Name, member?.GetValue(graph), Indent(recurenceLvl));
         }
-
         void WriteHeader(StreamWriter serializationWriter, object graph, PropertyInfo member, long id, bool isFirstTime, int recurenceLvl)
         {
             if (isFirstTime)
@@ -606,7 +468,6 @@ namespace cokolwiek
                 serializationWriter.WriteLine("{3}{{Type={0}  REF_ID={1} Name={2}}} (", graph.GetType().FullName, id, member?.Name, Indent(recurenceLvl));
             }
         }
-
         void WriteCollectionHeader(StreamWriter serializationWriter, object graph, PropertyInfo member, long id, bool isFirstTime, int recurenceLvl)
         {
             if (isFirstTime)
@@ -619,6 +480,12 @@ namespace cokolwiek
             }
         }
         #endregion
+
+        string Indent(int recurenceLvl)
+        {
+            return String.Concat(Enumerable.Repeat(indenter, recurenceLvl));
+        }
+
         public ISurrogateSelector SurrogateSelector
         {
             get { return surrogateSelector; }
