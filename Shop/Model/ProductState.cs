@@ -9,7 +9,7 @@ namespace Shop
     [Serializable]
     public class ProductState
     {
-        public Product Product { get; } // what that would mean if you could change product described by that state ?
+        public Product Product { get; set; } // what that would mean if you could change product described by that state ?
         public int Amount { get; set; }
         public decimal PriceNetto { get; set; }
         public Percentage TaxRate { get; set; }

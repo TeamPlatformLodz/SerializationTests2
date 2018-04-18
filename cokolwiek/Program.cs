@@ -50,8 +50,7 @@ namespace cokolwiek
             };
             var driver = new Driver()
             {
-                Cars = list,
-                Owner = owner
+                Cars = new Car[] {car1, car2}
             };
 
             var prod = new ProductState(new Product("213"), 12, (decimal)14.32, new Percentage(12));
@@ -59,10 +58,12 @@ namespace cokolwiek
             Produktieren products = new Produktieren();
             products.states.Add(prod);
 
-            form.Serialize(fs, context);
+            ShopContextWrapper wrapper = new ShopContextWrapper(context);
+            form.Serialize(fs, wrapper);
 
             FileStream deserFS = new FileStream("tekst.txt", FileMode.Open);
             var deser = form.Deserialize(deserFS);
+            var deserContext = ((ShopContextWrapper)deser).GetContext();
         }
         public class Produktieren
         {
@@ -70,8 +71,7 @@ namespace cokolwiek
         }
         internal class Driver
         {
-            public List<Car> Cars { get; set; }
-            public Owner Owner { get; set; }
+            public Car[] Cars { get; set; }
         }
     }
 }

@@ -13,6 +13,7 @@ namespace Shop
 
         public string Id { get => id; set => id = value; }
         public string Name { get; set; }
+        public string Model { get; set; } = "Yrok";
 
         public Product() { }
 

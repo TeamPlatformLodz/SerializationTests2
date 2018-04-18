@@ -20,7 +20,6 @@ namespace cokolwiek
         StreamingContext context;
         ISurrogateSelector surrogateSelector;
         ObjectIDGenerator idGenerator;
-        //Assembly usedAssembly;
 
         private readonly string indenter = "    ";
 
@@ -28,7 +27,6 @@ namespace cokolwiek
         {
             context = new StreamingContext(StreamingContextStates.All);
             idGenerator = new ObjectIDGenerator();
-            //usedAssembly = Assembly.LoadWithPartialName("Shop");
         }
 
         public object Deserialize(System.IO.Stream serializationStream)
@@ -39,14 +37,14 @@ namespace cokolwiek
                 Dictionary<string, object> objectDictionary = new Dictionary<string, object>();
                 Stack<object> objectLoadOrder = new Stack<object>();
                 Dictionary<string, List<object>> placeholderLists = new Dictionary<string, List<object>>();
-                Dictionary<List<object>, string> placeholderListsId = new Dictionary<List<object>, string>;
                 Dictionary<object, string> placeholderRealTypes = new Dictionary<object, string>();
-                Dictionary<object, string> placeholderElementTypes = new Dictionary<object, string>();
+                Dictionary<object, string[]> placeholderElementTypes = new Dictionary<object, string[]>();
 
                 Metadata meta;
                 string line = ""; 
                 line = sr.ReadLine();
-                while(line != null)
+                #region read lines
+                while (line != null)
                 {
                     meta = RH.ReadMetadata(line);
                     if (meta.Type != "")
@@ -71,6 +69,7 @@ namespace cokolwiek
                                 {
                                     objectsInfo[topObject].Add(propertyForNewObjectInfo);
                                 }
+                                objectLoadOrder.Push(new object());
                             }
                             else // not a refID, so construct new object
                             {
@@ -90,7 +89,9 @@ namespace cokolwiek
                                         newObject = new List<object>();
                                         placeholderLists.Add(meta.Id, (List<object>)newObject); //register new placeholder
                                         placeholderRealTypes.Add(newObject, meta.Type);
-                                        placeholderElementTypes.Add(newObject, RH.LookForListElementType(line));
+                                        string firstTypeName = RH.LookForListElementType(line);
+                                        string secondTypeName = RH.LookForSecondElementType(line);
+                                        placeholderElementTypes.Add(newObject, new string[] { firstTypeName, secondTypeName });
                                     }
                                     else
                                     {
@@ -99,6 +100,7 @@ namespace cokolwiek
 
                                     objectDictionary.Add(meta.Id, newObject); //register object
                                     objectsInfo.Add(newObject, new List<ClassLoadInfo>());//register missing property
+
                                     //register in previous object properties
                                     var propertyForNewObjectInfo = new ClassLoadInfo()
                                     {
@@ -113,79 +115,169 @@ namespace cokolwiek
                         }
                         else //is value type
                         {
-                            object valueToSet = RH.LookForValue(line);
-                            if (meta.Type == "System.Int32")
-                                valueToSet = Convert.ToInt32(valueToSet);
-                            if (meta.Type == "System.Double")
-                                valueToSet = Convert.ToDouble(valueToSet);
-                            if (meta.Type == "System.Single")
-                                valueToSet = Convert.ToSingle(valueToSet);
-                            if (meta.Type == "System.Decimal")
-                                valueToSet = Convert.ToDecimal(valueToSet);
-                            if (meta.Type == "System.DateTime")
-                                valueToSet = Convert.ToDateTime(valueToSet);
+                            var valueToSet = GetValueToSet(line, meta.Type);
                             var objectToSet = objectLoadOrder.Peek();
-                            if(objectToSet is ICollection)
+                            if(objectToSet is IList) //add to collection
                             {
                                 var placeList =  objectToSet as IList;
                                 placeList.Add(valueToSet);
                             }
-                            else
+                            else //set property
                             {
                                 var property = objectToSet.GetType().GetProperty(meta.Name);
                                 property.SetValue(objectToSet, valueToSet, null);
                             }
                         }
                     }
-                    if (CheckForClassEnding(line) ) // top object is finished
+                    if (CheckForClassEnding(line)) // top object is finished
                     {
                         if (objectLoadOrder.Count != 0)
                             objectLoadOrder.Pop();
                     }
-
+                    if (CheckForCollectionEnding(line) && objectLoadOrder.Peek() is IList)
+                    {
+                        if (objectLoadOrder.Count != 0)
+                            objectLoadOrder.Pop();
+                    }
                     line = sr.ReadLine();
                 }
+#endregion
+
                 foreach (var key in placeholderLists.Keys)
                 {
-                    var list = placeholderLists[key]
+                    var list = placeholderLists[key];
+                    var typeName = placeholderRealTypes[list];
+                    string[] typeNames = placeholderElementTypes[list];
+                    var collection = CreateProperCollection(typeName, typeNames);
+                    if (collection is List<Client>)
+                    {
+                        var listCollection = collection as List<Client>;
+                        var clients = objectsInfo[list];
+                        foreach (var client in clients)
+                        {
+                            var itemToLoad = objectDictionary[client.Id];
+                            listCollection.Add((Client)itemToLoad);
+                        }
+                        objectDictionary[key] = listCollection; //swap proper list with placeholder
+                        var tempInfo = objectsInfo[list];
+                        objectsInfo.Remove(list);
+                        objectsInfo.Add(listCollection, tempInfo);
+                    }
+                    if (collection is List<String>)
+                    {
+                        var listCollection = collection as List<String>;
+                        var keys = objectsInfo[list];
+                        foreach (var productKey in keys)
+                        {
+                            var itemToLoad = objectDictionary[productKey.Id];
+                            listCollection.Add((String)itemToLoad);
+                        }
+                        objectDictionary[key] = listCollection; //swap proper list with placeholder
+                        var tempInfo = objectsInfo[list];
+                        objectsInfo.Remove(list);
+                        objectsInfo.Add(listCollection, tempInfo);
+                    }
+                    if (collection is List<Product>)
+                    {
+                        var listCollection = collection as List<Product>;
+                        var prodcucts = objectsInfo[list];
+                        foreach (var product in prodcucts)
+                        {
+                            var itemToLoad = objectDictionary[product.Id];
+                            listCollection.Add((Product)itemToLoad);
+                        }
+                        objectDictionary[key] = listCollection; //swap proper list with placeholder
+                        var tempInfo = objectsInfo[list];
+                        objectsInfo.Remove(list);
+                        objectsInfo.Add(listCollection, tempInfo);
+                    }
+                    if (collection is List<Invoice>)
+                    {
+                        var listCollection = collection as List<Invoice>;
+                        var invoices = objectsInfo[list];
+                        foreach (var invoice in invoices)
+                        {
+                            var itemToLoad = objectDictionary[invoice.Id];
+                            listCollection.Add((Invoice)itemToLoad);
+                        }
+                        objectDictionary[key] = listCollection;
+                        var tempInfo = objectsInfo[list];
+                        objectsInfo.Remove(list);
+                        objectsInfo.Add(listCollection, tempInfo);
+                    }
+                    if (collection is List<ProductState>)
+                    {
+                        var listCollection = collection as List<ProductState>;
+                        var pStates = objectsInfo[list];
+                        foreach (var state in pStates)
+                        {
+                            var itemToLoad = objectDictionary[state.Id];
+                            listCollection.Add((ProductState)itemToLoad);
+                        }
+                        objectDictionary[key] = listCollection;
+                        var tempInfo = objectsInfo[list];
+                        objectsInfo.Remove(list);
+                        objectsInfo.Add(listCollection, tempInfo);
+                    }
+  
                 }
 
-                foreach (var item in objectDictionary.Values) // look for placehoolder lists and rebuild
-                {
-                    if (item is IList) // item is collection, then build proper collection type and rewrite values
-                    {
-                        var typeName = placeholderRealTypes[item];
-                        var elemTypeName = placeholderElementTypes[item];
-                        var collection = CreateProperCollection(typeName, elemTypeName);
-                        
-                    }
-                }
                 foreach (var item in objectDictionary.Values) // assign created objects referenced by REF_ID
                 {
-                    var propertiesList = objectsInfo[item];
-                    if (item is IList)
+                    if (! (item is Percentage))
                     {
-                        var list = item as IList;
-                        foreach (var propertyInfo in propertiesList) //find object with that ID
+                        var propertiesList = objectsInfo[item];
+                        if (item is ICollection)
                         {
-                            list.Add(objectDictionary[propertyInfo.Id]);  //add element
+                            //var list = item as IList;
+                            //foreach (var propertyInfo in propertiesList) //find object with that ID
+                            //{
+                            //    list.Add(objectDictionary[propertyInfo.Id]);  //add element
+                            //}
                         }
-                    }
-                    else
-                    {
-                        foreach (var propertyInfo in propertiesList) //find object with that ID
+                        else
                         {
-                            var property = item.GetType().GetProperty(propertyInfo.Name);
-                            property.SetValue(item, objectDictionary[propertyInfo.Id]);  //set property
+                            foreach (var propertyInfo in propertiesList) //find object with that ID
+                            {
+                                var property = item.GetType().GetProperty(propertyInfo.Name);
+                                var valueToSet = objectDictionary[propertyInfo.Id];
+                                property.SetValue(item, valueToSet);  //set property
+                            }
                         }
                     }
                 }
                 return objectDictionary.Values.First();
             }  
         }
-        object CreateProperCollection(string typeName, string elementTypeName)
+
+        private object GetValueToSet(string line, string type)
         {
-            var typeOfElement = GetInstance(elementTypeName).GetType();
+            object valueToSet = RH.LookForValue(line);
+            if (type == "System.Int32")
+                valueToSet = Convert.ToInt32(valueToSet);
+            if (type == "System.Double")
+                valueToSet = Convert.ToDouble(valueToSet);
+            if (type == "System.Single")
+                valueToSet = Convert.ToSingle(valueToSet);
+            if (type == "System.Decimal")
+                valueToSet = Convert.ToDecimal(valueToSet);
+            if (type == "System.DateTime")
+                valueToSet = Convert.ToDateTime(valueToSet);
+            return valueToSet;
+        }
+
+        object CreateProperCollection(string typeName, string[] elementTypeName)
+        {
+            var firstTypeName = elementTypeName[0];
+            Type typeOfFirstElement;
+            if (IsPrimitive(firstTypeName))
+            {
+                typeOfFirstElement = Type.GetType(elementTypeName[0]);
+            }
+            else
+            {
+                typeOfFirstElement = GetInstance(elementTypeName[0]).GetType();
+            }
             var result = TryGetList();
             if(result != null)
             {
@@ -196,7 +288,7 @@ namespace cokolwiek
             {
                 return result;
             }
-            //result = TryGetDictionary();
+            result = TryGetDictionary();
             if (result != null)
             {
                 return result;
@@ -207,7 +299,7 @@ namespace cokolwiek
             {
                 if (typeName.Contains("System.Collections.Generic.List"))
                 {
-                    return CreateGenericList(typeOfElement);
+                    return CreateGenericList(typeOfFirstElement);
                 }
                 return null;
             }
@@ -215,38 +307,96 @@ namespace cokolwiek
             {
                 if (typeName.Contains("System.Collections.Generic.ObservableCollection"))
                 {
-                    return CreateGenericObservableCollection(typeOfElement);
+                    return CreateGenericObservableCollection(typeOfFirstElement);
+                }
+                return null;
+            }
+            object TryGetDictionary()
+            {
+                if (typeName.Contains("System.Collections.Generic.Dictionary"))
+                {
+                    Type typeOfSecondElement;
+                    if (IsPrimitive(elementTypeName[1]))
+                    {
+                        typeOfSecondElement = Type.GetType(elementTypeName[1]);
+                    }
+                    else
+                    {
+                        typeOfSecondElement = GetInstance(elementTypeName[1]).GetType();
+                    }
+                    return CreateGenericDictionary(typeOfFirstElement, typeOfSecondElement); //two type params
                 }
                 return null;
             }
         }
 
-        #region old
-        //bool IfCollectionAdd(Stack<object> objectOrder, object toAdd)
-        //{
-        //    var topObject = objectOrder.Peek();
+        object GetPrimitiveInstance(string typeName)
+        {
+            if (typeName == "System.Int32")
+            {
+                int res = 0;
+                return res;
+            }
+            if (typeName == "System.Double")
 
-        //    if (topObject is IList) //add to collection instead of setting properties
-        //    {
-        //        var prevCollection = objectOrder.Peek() as IList;
-        //        prevCollection.Add(toAdd);
-        //        return true;
-        //    }
-        //    if (topObject is ObservableCollection<Invoice>) //checkl for observable coll
-        //    {
-        //        var collection = topObject as ObservableCollection<Invoice>;
-        //        collection.Add(toAdd as Invoice);
-        //        return true;
-        //    }
-        //    if (topObject is ObservableCollection<ProductState>) //checkl for observable coll
-        //    {
-        //        var collection = topObject as ObservableCollection<ProductState>;
-        //        collection.Add(toAdd as ProductState);
-        //        return true;
-        //    }
-        //    return false;
-        //}
-        #endregion
+            {
+                double res = 0;
+                return res;
+            }
+            if (typeName == "System.Single")
+            {
+                float res = 0;
+                return res;
+            }
+            if (typeName == "System.Decimal")
+            {
+                decimal res = 0;
+                return res;
+            }
+            if (typeName == "System.DateTime")
+            {
+                DateTime res = DateTime.MinValue;
+                return res;
+            }
+            return null;
+        }
+
+        bool IsPrimitive(string typeName)
+        {
+            if (typeName == "System.String")
+            {
+                return true;
+            }
+            if (typeName == "System.String[]")
+            {
+                return true;
+            }
+            if (typeName == "System.Int32")
+            {
+                return true;
+            }
+            if (typeName == "System.Int16")
+            {
+                return true;
+            }
+            if (typeName == "System.Double")
+            {
+                return true;
+            }
+            if (typeName == "System.Single")
+            {
+                return true;
+            }
+            if (typeName == "System.Decimal")
+            {
+                return true;
+            }
+            if (typeName == "System.DateTime")
+            {
+                return true;
+            }
+            return false;
+        }
 
         object CheckForCollectionType(string line, Metadata metadata)
         {
@@ -309,6 +459,13 @@ namespace cokolwiek
         {
             Type[] typeArgs = new Type[] { typeOfElement };
             var makeme = typeof(ObservableCollection<>).MakeGenericType(typeArgs);
+            object o = Activator.CreateInstance(makeme);
+            return o;
+        }
+        object CreateGenericDictionary(Type firstElementType, Type secondElementType)
+        {
+            Type[] typeArgs = new Type[] { firstElementType, secondElementType };
+            var makeme = typeof(Dictionary<,>).MakeGenericType(typeArgs);
             object o = Activator.CreateInstance(makeme);
             return o;
         }
