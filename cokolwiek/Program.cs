@@ -1,65 +1,67 @@
-﻿using System;
+﻿using Shop;
+using Shop.Logging;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.Serialization;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace cokolwiek
 {
-    class Program
+    public class Program
     {
         static void Main(string[] args)
         {
             IFormatter form = new CustomFormatter();
 
             FileStream fs = new FileStream("tekst.txt", FileMode.Create);
+
+            var logger = new FileLogger("FileLogger.txt");
+            var context = new ShopContext();
+            var inserter = new ConstantDataInserter();
+            inserter.InitializeContextWithData(context);
+            var repo = new ShopRepository(context, logger);
+            var service = new ShopService(repo, logger);
+
             var owner = new Owner()
             {
-                Name="Hanka"
+                Name = "TurTur"
             };
             var car1 = new Car()
             {
-                Model="Punciak",
-                Owner = owner
+                Owner = owner,
+                Model = "Niezly",
+                Year = 1234
             };
             var car2 = new Car()
             {
-                Model = "Punciak2",
+                Owner = owner,
+                Model = "gorszy",
+                Year = 0022
+            };
+            var list = new List<Car>();
+            list.Add(car1);
+            list.Add(car2);
+            var driver = new Driver()
+            {
+                Car = list,
                 Owner = owner
             };
-            List<Car> cars = new List<Car>() {car1, car2 };
-            TestContext con = new TestContext()
-            {
-                MyCar = car1,
-                MyOwner = owner
-            };
-
-            form.Serialize(fs, con);
-
-
-            //FileStream deFS = new FileStream("tekst.txt", FileMode.Open);
-            //var deCar = form.Deserialize(deFS);
-            ////DataContext dcx = new DataContext(cars);
-
-            var line = "@ID=123 ClassName=cokolwiek.Car";
-            var delimiters = new char[] {' ', '=' };
-            var id = line.Split(delimiters);
+            form.Serialize(fs, driver);
+            FileStream deserFS = new FileStream("tekst.txt", FileMode.Open);
+            //var deser = form.Deserialize(deserFS);
+            var line = "{Type=System.String Name=LastName}=Iommi";
+            var sth = RH.LookForMetadata(line);
+            var res = RH.LookForValue(line);
+            List<Client> cl = new List<Client>();
         }
-    }
-
-    internal class DataContext
-    {
-        public DataContext(List<Car> cars)
+        internal class Driver
         {
-           
+            public List<Car> Car { get; set; }
+            public Owner Owner { get; set; }
         }
-    }
-    [Serializable]
-    internal class TestContext
-    {
-        public Car MyCar { get; set; }
-        public Owner MyOwner { get; set; }
     }
 }
