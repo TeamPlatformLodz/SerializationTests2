@@ -2,6 +2,7 @@
 using Shop.Logging;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.Serialization;
@@ -42,25 +43,34 @@ namespace cokolwiek
                 Model = "gorszy",
                 Year = 0022
             };
-            var list = new List<Car>();
-            list.Add(car1);
-            list.Add(car2);
+            var list = new List<Car>
+            {
+                car1,
+                car2
+            };
             var driver = new Driver()
             {
-                Car = list,
+                Cars = list,
                 Owner = owner
             };
-            form.Serialize(fs, driver);
+
+            var prod = new ProductState(new Product("213"), 12, (decimal)14.32, new Percentage(12));
+
+            Produktieren products = new Produktieren();
+            products.states.Add(prod);
+
+            form.Serialize(fs, context);
+
             FileStream deserFS = new FileStream("tekst.txt", FileMode.Open);
-            //var deser = form.Deserialize(deserFS);
-            var line = "{Type=System.String Name=LastName}=Iommi";
-            var sth = RH.LookForMetadata(line);
-            var res = RH.LookForValue(line);
-            List<Client> cl = new List<Client>();
+            var deser = form.Deserialize(deserFS);
+        }
+        public class Produktieren
+        {
+            public ObservableCollection<ProductState> states { get; set; } = new ObservableCollection<ProductState>();
         }
         internal class Driver
         {
-            public List<Car> Car { get; set; }
+            public List<Car> Cars { get; set; }
             public Owner Owner { get; set; }
         }
     }

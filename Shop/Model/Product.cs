@@ -11,8 +11,10 @@ namespace Shop
     {
         private string id;
 
-        public string Id { get => id;}
+        public string Id { get => id; set => id = value; }
         public string Name { get; set; }
+
+        public Product() { }
 
         public Product(string name)
         {

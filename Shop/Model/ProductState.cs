@@ -13,6 +13,9 @@ namespace Shop
         public int Amount { get; set; }
         public decimal PriceNetto { get; set; }
         public Percentage TaxRate { get; set; }
+
+        public ProductState() { }
+
         public ProductState(Product product, int amount, decimal priceNetto, Percentage taxRate)
         {
             Product = product;

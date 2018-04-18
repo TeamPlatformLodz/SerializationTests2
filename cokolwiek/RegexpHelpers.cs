@@ -11,6 +11,7 @@ namespace cokolwiek
     {
         public static readonly char[] name_value_del = new char[] { '=' };
         public static readonly char[] metadata_del = new char[] { ' ' };
+        public static readonly string[] col_elemt_del = new string[] { "[[", "," };
         public static readonly string metadataPattern = @"(?<=\{)[^}]*(?=\})";
 
         public static Metadata ReadMetadata(string line)
@@ -82,7 +83,12 @@ namespace cokolwiek
             var result = values[values.Length - 1];
             return result;
         }
-
+        public static string LookForListElementType(string line)
+        {
+            var pieces = line.Split(col_elemt_del, StringSplitOptions.None);
+            var name = pieces[1];
+            return name;
+        }
         public static bool CheckIsRefId(string[] classMetadata)
         {
             bool isFound = false;
@@ -98,6 +104,17 @@ namespace cokolwiek
                 }
             }
             return isFound;
+        }
+        public static bool ContainsCollection(string line)
+        {
+            if (line.Contains("System.Collections.Generic.List"))
+                return true;
+            else if (line.Contains("System.Collections.ObjectModel.ObservableCollection"))
+                return true;
+            else if (line.Contains("System.Collections.Generic.Dictionary"))
+                return true;
+            else
+                return false;
         }
     }
 

@@ -28,7 +28,9 @@ namespace Shop
                     throw new PercentageException($"Cannot set {value} as percentage value");
             }
         }
-        
+
+        public Percentage() { }
+
         public Percentage(float percents) 
         {
             Value = percents;

@@ -11,13 +11,15 @@ namespace Shop
     {
         private string id;
 
-        public string Id { get => id; }
+        public string Id { get => id; set => id = value; }
         public DateTime PurchaseTime { get; set; }
         public Client Client { get; set; }
         public Product Product { get; set; }
         public int Amount { get; set; }
         public decimal Price { get; set; }
         public Percentage TaxRate { get; set; }
+
+        public Invoice() { }
 
         public Invoice(Client client, Product product, int amount, decimal price, Percentage taxRate)
         {
